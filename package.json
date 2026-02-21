@@ -1,15 +1,12 @@
 {
-  "name": "catbox-json-api",
+  "name": "catbox-upload-api",
   "version": "1.0.0",
   "description": "Catbox JSON Upload API for Vercel",
-  "main": "api/server.js",
+  "main": "api/upload.js",
   "type": "commonjs",
-  "scripts": {
-    "start": "node api/server.js"
-  },
   "dependencies": {
     "axios": "^1.6.0",
     "form-data": "^4.0.0",
-    "multer": "^1.4.5-lts.1"
+    "multiparty": "^4.2.3"
   }
 }
