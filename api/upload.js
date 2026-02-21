@@ -4,13 +4,12 @@ const multer = require("multer");
 
 module.exports.config = { api: { bodyParser: false } };
 
-// Limit 5MB, memoryStorage
+// Up to 50 MB
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
 });
 
-// Helper to run middleware
 function runMiddleware(req, res, fn) {
   return new Promise((resolve, reject) => {
     fn(req, res, (result) => {
@@ -20,31 +19,55 @@ function runMiddleware(req, res, fn) {
   });
 }
 
+// Fetch remote file by URL
+async function fetchFile(url) {
+  const response = await axios.get(url, { responseType: "arraybuffer" });
+  const contentType = response.headers["content-type"] || "application/octet-stream";
+  const filename = url.split("/").pop() || "file";
+  return { buffer: Buffer.from(response.data), filename, contentType };
+}
+
 module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, message: "Use POST" });
-  }
-
   try {
-    await runMiddleware(req, res, upload.single("file"));
+    let fileBuffer, filename, contentType;
 
-    if (!req.file) {
-      return res.status(400).json({ ok: false, message: "No file uploaded" });
+    if (req.method === "POST") {
+      await runMiddleware(req, res, upload.single("file"));
+
+      if (!req.file && !req.query.url) {
+        return res.status(400).json({ ok: false, message: "Upload file or use ?url=" });
+      }
+
+      if (req.file) {
+        fileBuffer = req.file.buffer;
+        filename = req.file.originalname;
+        contentType = req.file.mimetype;
+      } else if (req.query.url) {
+        const fetched = await fetchFile(req.query.url);
+        fileBuffer = fetched.buffer;
+        filename = fetched.filename;
+        contentType = fetched.contentType;
+      }
+    } else if (req.method === "GET" && req.query.url) {
+      const fetched = await fetchFile(req.query.url);
+      fileBuffer = fetched.buffer;
+      filename = fetched.filename;
+      contentType = fetched.contentType;
+    } else {
+      return res.status(405).json({ ok: false, message: "Use POST (multipart) or GET ?url=" });
     }
 
     const form = new FormData();
     form.append("reqtype", "fileupload");
-    form.append("fileToUpload", req.file.buffer, {
-      filename: req.file.originalname,
-      contentType: req.file.mimetype
-    });
+    form.append("fileToUpload", fileBuffer, { filename, contentType });
 
-    const response = await axios.post("https://catbox.moe/user/api.php", form, {
+    const catboxResp = await axios.post("https://catbox.moe/user/api.php", form, {
       headers: form.getHeaders(),
-      timeout: 30000
+      maxBodyLength: Infinity,
+      timeout: 60000
     });
 
-    const fileUrl = response.data?.trim();
+    const fileUrl = catboxResp.data?.trim();
 
     return res.status(200).json({
       ok: fileUrl.startsWith("http"),
@@ -52,12 +75,8 @@ module.exports = async (req, res) => {
       creator: "CyberX Devs"
     });
 
-  } catch (error) {
-    console.error("Catbox Upload Error:", error.message);
-    return res.status(500).json({
-      ok: false,
-      message: "Upload failed",
-      error: error.message
-    });
+  } catch (err) {
+    console.error("Upload Error:", err.message);
+    return res.status(500).json({ ok: false, message: "Upload failed", error: err.message });
   }
 };
